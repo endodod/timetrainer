@@ -26,6 +26,7 @@
     let r = rng() * tot; for (let i = 0; i < arr.length; i++) { r -= ws[i]; if (r <= 0) return arr[i]; } return arr[arr.length - 1];
   }
   const decade = y => Math.floor(y / 10) * 10;
+  function groupBy(arr, key) { const m = new Map(); arr.forEach(x => { const k = key(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }); return [...m]; }
   const range = (f, t) => t == null ? `${f}–today` : (f === t ? `${f}` : `${f}–${t}`);
   function yearScore(guess, f, t) {
     const hi = t == null ? NOW : t;
@@ -52,9 +53,11 @@
   function recordRound(mode, key, label, pts) {
     const s = stats(); const m = s.modes[mode] = s.modes[mode] || { rounds: 0, pts: 0, perfect: 0, miss: {}, labels: {} };
     m.rounds++; m.pts += pts; if (pts >= 900) m.perfect++;
-    m.labels[key] = label;
-    if (pts < 500) m.miss[key] = (m.miss[key] || 0) + 1;
-    else if (m.miss[key]) { m.miss[key] = Math.max(0, m.miss[key] - 1); if (!m.miss[key]) delete m.miss[key]; }
+    if (key) { // timeline rounds have no single item to retry
+      m.labels[key] = label;
+      if (pts < 500) m.miss[key] = (m.miss[key] || 0) + 1;
+      else if (m.miss[key]) { m.miss[key] = Math.max(0, m.miss[key] - 1); if (!m.miss[key]) delete m.miss[key]; }
+    }
     store.set(STATS, s);
   }
   function recordGame(g) { const s = stats(); s.games.unshift(g); s.games = s.games.slice(0, 50); store.set(STATS, s); }
@@ -83,6 +86,32 @@
   const brands = D.logos.brands;
   const outfitArts = D.outfits.articles;
   const plateGroups = [...new Set(plates.map(p => p.g))];
+  const marks = D.landmarks.items;
+  const markRange = l => l.gone ? `${l.y}–${l.gone}` : `${l.y}+`;
+
+  /* Timeline: pick items whose years are far enough apart that the order is unambiguous. */
+  function spreadPick(rng, pool, n, gap) {
+    const out = [];
+    for (const x of shuffle(rng, pool)) { if (out.every(o => Math.abs(o.year - x.year) >= gap)) out.push(x); if (out.length === n) break; }
+    return out;
+  }
+  const carSrc = c => ({ id: 'c:' + c.w, label: c.n, year: c.f, what: 'launched', get: () => Wiki.lead(c.w) });
+  const markSrc = l => ({ id: 'l:' + l.w, label: `${l.n} (${l.city})`, year: l.y, what: 'completed', get: () => Wiki.lead(l.w) });
+  async function timelineItems(rng, kind) {
+    if (kind === 'logos') {
+      for (const b of shuffle(rng, brands).slice(0, 6)) {
+        const list = await Wiki.logos(b.b, b.cats);
+        const items = spreadPick(rng, list.map(l => ({ id: 'g:' + l.file, label: `${b.b} logo`, year: l.from, what: 'introduced', img: l, logo: true })), 4, 3);
+        if (items.length >= 3) return items;
+      }
+      return null;
+    }
+    const pool = kind === 'cars' ? cars.map(carSrc) : kind === 'landmarks' ? marks.map(markSrc) : cars.map(carSrc).concat(marks.map(markSrc));
+    const items = spreadPick(rng, pool, 7, kind === 'mixed' ? 5 : 3);
+    const imgs = await Promise.all(items.map(x => x.get()));
+    const ok = items.filter((x, i) => (x.img = imgs[i]));
+    return ok.length >= 4 ? ok.slice(0, 4) : null;
+  }
 
   async function outfitPool() {
     const lists = await Promise.all(outfitArts.map(a => Wiki.gallery(a.w)));
@@ -184,12 +213,36 @@
         return { key: 'logos:' + l.file, label: `${b.b} ${l.from}`, media: figure(l, b.b + ' logo').replace('class="media"', 'class="media logo"'), img: l, prompt: `When was this ${esc(b.b)} logo in use?`, kind: 'year', f, t: t == null ? NOW : t, reveal };
       }
     },
+    landmarks: {
+      icon: '🏙️', title: 'Landmarks', blurb: 'When was it finished? Towers, bridges and skylines tell you the earliest possible year of a photo.',
+      types: [{ id: 'year', label: 'Year completed (slider)' }],
+      filters: [{ id: 'all', label: 'All' }].concat(D.landmarks.regions.map(g => ({ id: g, label: g }))),
+      async question(rng, s, weight) {
+        const pool = s.filter && s.filter !== 'all' ? marks.filter(l => l.g === s.filter) : marks;
+        const l = weightedPick(rng, pool, x => weight('landmarks:' + x.w));
+        const img = await Wiki.lead(l.w);
+        if (!img) return null;
+        const reveal = `<b>${esc(l.n)}</b>, ${esc(l.city)} · completed ${l.y}${l.gone ? `, destroyed ${l.gone}` : ''}<br><span class="tell">${esc(l.tell)}</span>`;
+        return { key: 'landmarks:' + l.w, label: l.n, media: figure(img, 'a landmark'), img, prompt: 'When was this completed?', kind: 'year', f: l.y, t: l.y, reveal };
+      }
+    },
+    timeline: {
+      icon: '📅', title: 'Timeline', noLearn: true, blurb: 'Put 4 pictures in order, oldest to newest. Trains the core skill: spotting which thing in a photo is the newest.',
+      types: [{ id: 'mixed', label: 'Cars + landmarks' }, { id: 'cars', label: 'Cars only' }, { id: 'landmarks', label: 'Landmarks only' }, { id: 'logos', label: 'Logos of one brand' }],
+      async question(rng, s) {
+        const items = await timelineItems(rng, s.type || 'mixed');
+        if (!items) return null;
+        const sorted = items.slice().sort((a, b) => a.year - b.year);
+        const reveal = `<ol class="timeline">${sorted.map(x => `<li><b>${x.year}</b> ${esc(x.label)} <small>(${x.what})</small></li>`).join('')}</ol>`;
+        return { key: null, label: 'Timeline: ' + sorted.map(x => x.year).join(' → '), items, prompt: 'Click them from oldest to newest', kind: 'order', reveal };
+      }
+    },
     gauntlet: {
-      icon: '🏆', title: 'Gauntlet (mixed)', blurb: 'Everything mixed like a real round: cars, outfits, logos, plates and languages.',
+      icon: '🏆', title: 'Gauntlet (mixed)', noLearn: true, blurb: 'Everything mixed like a real round: cars, outfits, landmarks, logos, plates and languages.',
       types: [{ id: 'mix', label: 'Mixed' }],
       async question(rng, s, weight) {
-        const m = pick(rng, ['cars', 'cars', 'outfits', 'outfits', 'logos', 'plates', 'languages']);
-        const type = { cars: rng() < 0.6 ? 'year' : 'model', outfits: 'year', logos: 'year', plates: 'country', languages: 'lang' }[m];
+        const m = pick(rng, ['cars', 'cars', 'outfits', 'outfits', 'landmarks', 'logos', 'plates', 'languages']);
+        const type = { cars: rng() < 0.6 ? 'year' : 'model', outfits: 'year', landmarks: 'year', logos: 'year', plates: 'country', languages: 'lang' }[m];
         const q = await MODES[m].question.call(MODES[m], rng, { type, filter: 'all' }, missWeight(m));
         if (q) q.sub = m;
         return q;
@@ -212,12 +265,11 @@
     app.innerHTML = `
       <section class="hero">
         <h1>Train for TimeGuessr 2v2 ranked</h1>
-        <p>Picture-first drills for the things that win rounds: <b>cars</b>, <b>outfits</b>, <b>signage languages</b>, <b>license plates</b> and <b>logo changes</b>.
+        <p>Picture-first drills for the things that win rounds: <b>cars</b>, <b>outfits</b>, <b>landmarks</b>, <b>signage languages</b>, <b>license plates</b> and <b>logo changes</b>.
         Every mode has a <a href="#/sheets">cheat sheet</a> (also as <a href="TimeTrainer_Cheatsheets.xlsx">Excel file</a>). Your misses come back more often.</p>
         <p class="sub">Playing with a teammate? Start a mode, press <b>Challenge link</b> and send it. You both get the same rounds and can compare scores.</p>
       </section>
       <div class="grid modes">${Object.keys(MODES).map(card).join('')}
-        <a class="card mode" href="#/tips"><div class="icon">💡</div><h3>Queue tips</h3><p>Import the tips TimeGuessr shows while you queue, sorted by topic, as flashcards.</p><div class="meta">${tipsAll().length} tips</div></a>
         <a class="card mode" href="#/sheets/general"><div class="icon">🕰️</div><h3>Era tells</h3><p>The baseline: photo quality, phones, streetlights, landmarks, historical events.</p><div class="meta">cheat sheet</div></a>
       </div>`;
   }
@@ -237,18 +289,20 @@
           ${sel('Type', m.types, last.type)}
           ${m.filters ? sel('Filter', m.filters, last.filter) : ''}
           ${sel('Rounds', [{ id: '5', label: '5' }, { id: '10', label: '10' }, { id: '20', label: '20' }, { id: '0', label: 'Endless' }], last.rounds || '10')}
+          ${sel('Timer', [{ id: '0', label: 'No time limit' }, { id: '60', label: '60 s per round' }, { id: '30', label: '30 s per round' }, { id: '15', label: '15 s per round (blitz)' }], last.timer || '0')}
           <div class="row">
             <button class="btn primary" type="submit">Start ▶</button>
             <button class="btn" type="button" id="challenge">Challenge link 🔗</button>
-            ${id !== 'gauntlet' ? `<a class="btn ghost" href="#/learn/${id}">Learn gallery</a><a class="btn ghost" href="#/sheets/${id}">Cheat sheet</a>` : ''}
+            ${!m.noLearn ? `<a class="btn ghost" href="#/learn/${id}">Learn gallery</a><a class="btn ghost" href="#/sheets/${id}">Cheat sheet</a>` : ''}
           </div>
         </form>
       </section>`;
-    const params = () => { const f = new FormData($('#setup')); const o = { type: f.get('type'), filter: f.get('filter') || 'all', rounds: f.get('rounds') }; store.set('tt_last_' + id, o); return o; };
-    $('#setup').onsubmit = e => { e.preventDefault(); const p = params(); location.hash = `#/play/${id}?type=${p.type}&filter=${encodeURIComponent(p.filter)}&n=${p.rounds}`; };
+    const params = () => { const f = new FormData($('#setup')); const o = { type: f.get('type'), filter: f.get('filter') || 'all', rounds: f.get('rounds'), timer: f.get('timer') || '0' }; store.set('tt_last_' + id, o); return o; };
+    const qs = (p, n) => `type=${p.type}&filter=${encodeURIComponent(p.filter)}&n=${n}${+p.timer ? '&t=' + p.timer : ''}`;
+    $('#setup').onsubmit = e => { e.preventDefault(); const p = params(); location.hash = `#/play/${id}?${qs(p, p.rounds)}`; };
     $('#challenge').onclick = () => {
       const p = params(); const seed = Math.random().toString(36).slice(2, 8);
-      const url = location.href.split('#')[0] + `#/play/${id}?type=${p.type}&filter=${encodeURIComponent(p.filter)}&n=${p.rounds === '0' ? 10 : p.rounds}&seed=${seed}`;
+      const url = location.href.split('#')[0] + `#/play/${id}?${qs(p, p.rounds === '0' ? 10 : p.rounds)}&seed=${seed}`;
       copyText(url);
       toast('Challenge link copied: send it to your teammate');
     };
@@ -261,38 +315,47 @@
     setNav('home');
     const n = +(q.get('n') || 10);
     const seed = q.get('seed');
-    game = { id, m, n, seed, rng: rngFrom(seed || Math.random()), s: { type: q.get('type') || m.types[0].id, filter: q.get('filter') || 'all' }, round: 0, total: 0, log: [], token: Symbol() };
+    game = { id, m, n, seed, limit: +(q.get('t') || 0), rng: rngFrom(seed || Math.random()), s: { type: q.get('type') || m.types[0].id, filter: q.get('filter') || 'all' }, round: 0, total: 0, log: [], token: Symbol() };
     game.weight = seed ? () => 1 : missWeight(id);
     nextRound();
   }
+  function hud(g, q, clock = true) {
+    return `<div class="hud"><span>${g.m.icon} ${g.m.title}${q && q.sub ? ' · ' + MODES[q.sub].title : ''}${g.seed ? ` · <span class="pill">challenge ${esc(g.seed)}</span>` : ''}</span>
+      <span>${g.limit && clock ? `<span class="clock" id="clock">⏱ ${g.limit}s</span> ` : ''}<span id="score">Round ${g.round}${g.n ? '/' + g.n : ''} · <b>${g.total}</b> pts</span></span></div>`;
+  }
+  const preload = src => new Promise(res => { const im = new Image(); im.onload = im.onerror = res; im.src = src; setTimeout(res, 4000); });
   async function nextRound() {
     const g = game; const tok = g.token;
+    clearInterval(g.timerId);
     if (g.n && g.round >= g.n) return endGame();
     g.round++;
-    app.innerHTML = `<section class="play"><div class="hud"><span>${g.m.icon} ${g.m.title}${g.seed ? ` · <span class="pill">challenge ${esc(g.seed)}</span>` : ''}</span><span>Round ${g.round}${g.n ? '/' + g.n : ''} · <b>${g.total}</b> pts</span></div><div class="loading">Loading picture…</div></section>`;
+    app.innerHTML = `<section class="play">${hud(g, null, false)}<div class="loading">Loading picture…</div></section>`;
     let qn = null;
     for (let i = 0; i < 10 && !qn; i++) {
       try { qn = await g.m.question.call(g.m, g.rng, g.s, g.weight); } catch (e) { console.warn(e); }
       if (tok !== game.token) return;
     }
     if (!qn) { app.innerHTML = `<section class="panel"><h2>Couldn't load pictures</h2><p>The Wikipedia image API didn't answer. Check your connection (or an ad/privacy blocker blocking wikipedia.org) and try again.</p><a class="btn" href="#/mode/${g.id}">Back</a></section>`; return; }
-    if (qn.img) { await new Promise(res => { const im = new Image(); im.onload = im.onerror = res; im.src = qn.img.src; setTimeout(res, 4000); }); }
+    const srcs = qn.items ? qn.items.map(x => x.img.src) : qn.img ? [qn.img.src] : [];
+    await Promise.all(srcs.map(preload));
     if (tok !== game.token) return;
     g.q = qn;
     renderQuestion();
   }
   function renderQuestion() {
     const g = game, q = g.q;
-    const answerUi = q.kind === 'year'
-      ? `<div class="yearpick">
+    let answerUi = '', stage = `<div class="stage">${q.media}</div>`;
+    if (q.kind === 'year') answerUi = `<div class="yearpick">
           <div class="yearval" id="yv">${g.lastGuess || 1970}</div>
           <input type="range" id="yr" min="${MIN_YEAR}" max="${NOW}" value="${g.lastGuess || 1970}">
           <div class="row center"><button class="btn sm" data-d="-10">−10</button><button class="btn sm" data-d="-1">−1</button><button class="btn sm" data-d="1">+1</button><button class="btn sm" data-d="10">+10</button></div>
           <div class="decades">${Array.from({ length: Math.floor((NOW - MIN_YEAR) / 10) + 1 }, (_, i) => MIN_YEAR + i * 10).map(d => `<button class="chip" data-y="${d + 5}">${d}s</button>`).join('')}</div>
-          <button class="btn primary big" id="go">Guess ⏎</button></div>`
-      : `<div class="choices">${q.options.map((o, i) => `<button class="btn choice" data-id="${esc(o.id)}"><kbd>${i + 1}</kbd> ${esc(o.label)}</button>`).join('')}</div>`;
-    $('.play').innerHTML = `<div class="hud"><span>${g.m.icon} ${g.m.title}${q.sub ? ' · ' + MODES[q.sub].title : ''}${g.seed ? ` · <span class="pill">challenge ${esc(g.seed)}</span>` : ''}</span><span>Round ${g.round}${g.n ? '/' + g.n : ''} · <b>${g.total}</b> pts</span></div>
-      <div class="stage">${q.media}</div>
+          <button class="btn primary big" id="go">Guess ⏎</button></div>`;
+    else if (q.kind === 'order') {
+      stage = `<div class="ogrid">${q.items.map((x, i) => `<button class="ocard${x.logo ? ' logo' : ''}" data-i="${i}"><img src="${esc(x.img.src)}" alt="picture ${i + 1}"><kbd>${i + 1}</kbd><span class="rank"></span><span class="olab"></span></button>`).join('')}</div>`;
+      answerUi = `<div class="row center"><button class="btn ghost" id="undo">Undo</button><button class="btn primary big" id="go" disabled>Check order ⏎</button></div>`;
+    } else answerUi = `<div class="choices">${q.options.map((o, i) => `<button class="btn choice" data-id="${esc(o.id)}"><kbd>${i + 1}</kbd> ${esc(o.label)}</button>`).join('')}</div>`;
+    $('.play').innerHTML = `${hud(g, q)}${stage}
       <h2 class="prompt">${q.prompt}</h2>
       <div id="answer">${answerUi}</div>
       <div id="reveal"></div>`;
@@ -304,30 +367,81 @@
       $$('[data-y]').forEach(b => b.onclick = () => set(+b.dataset.y));
       $('#go').onclick = () => answer(+yr.value);
       yr.focus();
+    } else if (q.kind === 'order') {
+      g.order = [];
+      const paint = () => {
+        $$('.ocard').forEach(b => { const r = g.order.indexOf(+b.dataset.i); b.classList.toggle('picked', r >= 0); b.querySelector('.rank').textContent = r >= 0 ? r + 1 : ''; });
+        $('#go').disabled = g.order.length < q.items.length;
+      };
+      $$('.ocard').forEach(b => b.onclick = () => {
+        if (g.answered === g.round) return;
+        const i = +b.dataset.i, r = g.order.indexOf(i);
+        if (r >= 0) g.order.splice(r); // un-pick this card and everything after it
+        else {
+          g.order.push(i);
+          if (g.order.length === q.items.length - 1) g.order.push(q.items.findIndex((_, k) => !g.order.includes(k))); // last one is forced
+        }
+        paint();
+      });
+      $('#undo').onclick = () => { if (g.answered !== g.round) { g.order.pop(); paint(); } };
+      $('#go').onclick = () => answer(g.order.slice());
     } else {
       $$('.choice').forEach(b => b.onclick = () => answer(b.dataset.id));
     }
+    if (g.limit) startClock(g);
   }
-  function answer(val) {
+  function startClock(g) {
+    let left = g.limit; const round = g.round;
+    clearInterval(g.timerId);
+    g.timerId = setInterval(() => {
+      const el = $('#clock');
+      if (game !== g || g.round !== round || g.answered === round || !el) return clearInterval(g.timerId);
+      left--; el.textContent = `⏱ ${left}s`; el.classList.toggle('low', left <= 5);
+      if (left > 0) return;
+      clearInterval(g.timerId);
+      const q = g.q;
+      if (q.kind === 'year') answer(+$('#yr').value, true);
+      else if (q.kind === 'order') answer(g.order.concat(q.items.map((_, i) => i).filter(i => !g.order.includes(i))), true);
+      else answer(null, true);
+    }, 1000);
+  }
+  function answer(val, timedOut) {
     const g = game, q = g.q; if (g.answered === g.round) return; g.answered = g.round;
+    clearInterval(g.timerId);
     let pts, verdict;
     if (q.kind === 'year') {
       g.lastGuess = val;
       const r = yearScore(val, q.f, q.t); pts = r.pts;
       verdict = r.off === 0 ? `Spot on: <b>${val}</b>` : `You said <b>${val}</b>, ${r.off} year${r.off === 1 ? '' : 's'} off`;
       $('#answer').innerHTML = `<div class="yearline">${yearLine(val, q.f, q.t)}</div>`;
+    } else if (q.kind === 'order') {
+      // Score = share of pairs that are in the right relative order.
+      let good = 0, all = 0;
+      for (let a = 0; a < val.length; a++) for (let b = a + 1; b < val.length; b++) { all++; if (q.items[val[a]].year < q.items[val[b]].year) good++; }
+      pts = Math.round(1000 * good / all);
+      verdict = pts === 1000 ? 'Perfect order!' : `${good} of ${all} pairs in the right order`;
+      const truth = q.items.map((x, i) => i).sort((a, b) => q.items[a].year - q.items[b].year);
+      $$('.ocard').forEach(b => {
+        const i = +b.dataset.i, mine = val.indexOf(i), right = truth.indexOf(i), x = q.items[i];
+        b.disabled = true; b.classList.remove('picked'); b.classList.add(mine === right ? 'right' : 'wrong');
+        b.querySelector('.rank').textContent = mine === right ? right + 1 : `${mine + 1}→${right + 1}`;
+        b.querySelector('.olab').innerHTML = `<b>${x.year}</b> ${esc(x.label)}`;
+      });
+      $('#answer').innerHTML = '';
     } else {
       pts = val === q.answer ? 1000 : 0;
       verdict = pts ? 'Correct!' : 'Not quite';
       $$('.choice').forEach(b => { b.disabled = true; if (b.dataset.id === q.answer) b.classList.add('right'); else if (b.dataset.id === val) b.classList.add('wrong'); });
     }
+    if (timedOut) verdict = `⏱ Time's up. ${verdict}`;
     g.total += pts;
     g.log.push({ label: q.label, pts, sub: q.sub });
     recordRound(q.sub || g.id, q.key, q.label, pts);
-    $('.hud span:last-child').innerHTML = `Round ${g.round}${g.n ? '/' + g.n : ''} · <b>${g.total}</b> pts`;
+    $('#score').innerHTML = `Round ${g.round}${g.n ? '/' + g.n : ''} · <b>${g.total}</b> pts`;
+    const credits = q.items ? `<div class="credits">${q.items.map(x => credit(x.img)).join('')}</div>` : credit(q.img);
     $('#reveal').innerHTML = `<div class="reveal ${pts >= 900 ? 'good' : pts >= 400 ? 'ok' : 'bad'}">
         <div class="verdict">${verdict} <span class="pts">+${pts}</span></div>
-        <div class="explain">${q.reveal}</div>${credit(q.img)}
+        <div class="explain">${q.reveal}</div>${credits}
         <div class="row"><button class="btn primary" id="next">${g.n && g.round >= g.n ? 'Results' : 'Next'} ⏎</button><a class="btn ghost" href="#/mode/${g.id}">Quit</a></div></div>`;
     $('#next').onclick = nextRound;
     $('#next').focus();
@@ -345,7 +459,7 @@
       <h1>${g.m.icon} ${g.total} <small>/ ${max}</small></h1>
       <p>${g.log.filter(l => l.pts >= 900).length} of ${g.log.length} spot on.</p>
       <ol class="results">${g.log.map(l => `<li class="${l.pts >= 900 ? 'good' : l.pts >= 400 ? 'ok' : 'bad'}"><span>${esc(l.label)}</span><b>${l.pts}</b></li>`).join('')}</ol>
-      <div class="row"><button class="btn" id="share">Copy result</button><button class="btn primary" id="again">Play again</button><a class="btn ghost" href="#/mode/${g.id}">Settings</a>${g.id !== 'gauntlet' ? `<a class="btn ghost" href="#/sheets/${g.id}">Cheat sheet</a>` : ''}</div></section>`;
+      <div class="row"><button class="btn" id="share">Copy result</button><button class="btn primary" id="again">Play again</button><a class="btn ghost" href="#/mode/${g.id}">Settings</a>${!g.m.noLearn ? `<a class="btn ghost" href="#/sheets/${g.id}">Cheat sheet</a>` : ''}</div></section>`;
     $('#share').onclick = () => copyText(text + (g.seed ? '\n' + location.href : ''));
     $('#again').onclick = () => { const q = new URLSearchParams(location.hash.split('?')[1] || ''); q.delete('seed'); location.hash = `#/play/${g.id}?${q}&r=${Date.now() % 1e5}`; };
   }
@@ -353,7 +467,8 @@
     if (!game || !$('.play')) return;
     if (e.target.tagName === 'INPUT' && e.target.type !== 'range') return;
     if (e.key === 'Enter') { const n = $('#next'); if (n) { e.preventDefault(); n.click(); } else if ($('#go')) { e.preventDefault(); $('#go').click(); } }
-    if (/^[1-4]$/.test(e.key)) { const b = $$('.choice')[+e.key - 1]; if (b && !b.disabled) b.click(); }
+    if (/^[1-4]$/.test(e.key)) { const b = $$('.choice, .ocard')[+e.key - 1]; if (b && !b.disabled) b.click(); }
+    if (e.key === 'Backspace' && $('#undo')) { e.preventDefault(); $('#undo').click(); }
   });
 
   /* ---------------- learn galleries ---------------- */
@@ -368,6 +483,10 @@
       app.innerHTML = `<section>${head('Car gallery', `<p class="sub">Sorted by launch year. Hover/tap a card for the tell. ${D.cars.about}</p>`)}
         <div class="chips">${decs.map(d => `<a class="chip" href="#dec${d}" onclick="document.getElementById('dec${d}').scrollIntoView({behavior:'smooth'});return false">${d}s</a>`).join('')}</div>
         ${decs.map(d => `<h2 id="dec${d}" class="dechead">${d}s</h2><div class="grid gallery">${cars.filter(c => decade(c.f) === d).sort((a, b) => a.f - b.f).map(c => `<div class="card pic" data-w="${esc(c.w)}"><div class="ph"></div><div class="cap"><b>${esc(c.n)}</b><span>${range(c.f, c.t)} · ${esc(c.r)}</span><em>${esc(c.tell)}</em></div></div>`).join('')}</div>`).join('')}</section>`;
+      $$('.pic[data-w]').forEach(el => lazy(el, async () => { const img = await Wiki.lead(el.dataset.w); el.querySelector('.ph').outerHTML = img ? `<img src="${esc(img.src)}" alt="" loading="lazy">` : '<div class="ph none">no image</div>'; }));
+    } else if (id === 'landmarks') {
+      app.innerHTML = `<section>${head('Landmarks', `<p class="sub">${esc(D.landmarks.about)}</p>`)}
+        ${D.landmarks.regions.map(g => `<h2 class="dechead">${esc(g)}</h2><div class="grid gallery">${marks.filter(l => l.g === g).sort((a, b) => a.y - b.y).map(l => `<div class="card pic" data-w="${esc(l.w)}"><div class="ph"></div><div class="cap"><b>${esc(l.n)}</b><span>${markRange(l)} · ${esc(l.city)}</span><em>${esc(l.tell)}</em></div></div>`).join('')}</div>`).join('')}</section>`;
       $$('.pic[data-w]').forEach(el => lazy(el, async () => { const img = await Wiki.lead(el.dataset.w); el.querySelector('.ph').outerHTML = img ? `<img src="${esc(img.src)}" alt="" loading="lazy">` : '<div class="ph none">no image</div>'; }));
     } else if (id === 'outfits') {
       app.innerHTML = `<section>${head('Fashion by decade', `<p class="sub">${D.outfits.about}</p>`)}
@@ -398,132 +517,85 @@
     } else viewHome();
   }
 
-  /* ---------------- cheat sheets ---------------- */
-  function sheetTables(id) {
+  /* ---------------- cheat sheets ----------------
+   * Each sheet is a list of sections. A section is shown as cards (one per group) and
+   * keeps a flat table (cols/rows) for the CSV download. A fact is
+   * { tag, h, sub, body, kv: [[label, text]], note }. */
+  function sheetSections(id) {
     switch (id) {
-      case 'general': return [
-        { title: 'Era tells', cols: ['Category', 'Clue', 'Period'], rows: D.general.sheet },
-        { title: 'Baseline strategy', cols: ['#', 'Tip'], rows: D.general.baseline_tips.map((t, i) => [i + 1, t]) },
-        { title: 'Dating clues from brands & objects', cols: ['Clue', 'Year', 'Note'], rows: D.logos.sheet_extra }];
+      case 'general': {
+        const icons = { Photo: '📷', People: '🧍', Street: '🛣️', Tech: '📺', History: '📜', Architecture: '🏛️' };
+        return [
+          { title: 'Work through a photo like this', cols: ['#', 'Tip'], rows: D.general.baseline_tips.map((t, i) => [i + 1, t]), one: true,
+            groups: [{ ordered: true, items: D.general.baseline_tips.map(t => ({ body: t })) }] },
+          { title: 'Era tells', cols: ['Category', 'Clue', 'Period'], rows: D.general.sheet,
+            groups: groupBy(D.general.sheet, r => r[0]).map(([name, rs]) => ({ name: `${icons[name] || ''} ${name}`, items: rs.map(r => ({ tag: r[2], body: r[1] })) })) },
+          { title: 'Objects that date a photo', cols: ['Clue', 'Year', 'Note'], rows: D.logos.sheet_extra,
+            groups: [{ name: 'Not before…', items: D.logos.sheet_extra.slice().sort((a, b) => a[1] - b[1]).map(r => ({ tag: r[1], h: r[0], body: r[2] })) }] }];
+      }
       case 'cars': return [
-        { title: 'Car shapes by era', cols: ['Era', 'What to look for', 'Typical models'], rows: D.cars.sheet },
-        { title: 'Model list', cols: ['Model', 'From', 'To', 'Region', 'Tell'], rows: cars.slice().sort((a, b) => a.f - b.f).map(c => [c.n, c.f, c.t == null ? 'today' : c.t, c.r, c.tell]) }];
-      case 'outfits': return [{ title: 'Fashion by decade', cols: ['Decade', 'Women', 'Men', 'Quick tell'], rows: D.outfits.sheet }];
-      case 'languages': return [{ title: 'Languages & scripts', cols: ['Language', 'Script', 'Unique letters', 'Giveaway words', "Don't confuse with"], rows: langs.map(l => [l.n, l.script, l.uniq, l.words, l.vs]) }];
-      case 'plates': return [{ title: 'License plates', cols: ['Country', 'Region', 'Current format', 'Tells & history'], rows: plates.map(p => [p.c, p.g, p.now, p.tell]) }];
+        { title: 'Car shapes by era', cols: ['Era', 'What to look for', 'Typical models'], rows: D.cars.sheet,
+          groups: D.cars.sheet.map(r => ({ name: r[0], items: [({ body: r[1], note: 'e.g. ' + r[2] })] })) },
+        { title: 'Models by launch decade', cols: ['Model', 'From', 'To', 'Region', 'Tell'], rows: cars.slice().sort((a, b) => a.f - b.f).map(c => [c.n, c.f, c.t == null ? 'today' : c.t, c.r, c.tell]),
+          groups: groupBy(cars.slice().sort((a, b) => a.f - b.f), c => decade(c.f)).map(([d, cs]) => ({ name: `${d}s`, items: cs.map(c => ({ tag: range(c.f, c.t), h: c.n, sub: c.r, body: c.tell })) })) }];
+      case 'outfits': return [
+        { title: 'Fashion by decade', cols: ['Decade', 'Women', 'Men', 'Quick tell'], rows: D.outfits.sheet,
+          groups: D.outfits.sheet.map(r => ({ name: r[0], lead: r[3], items: [({ kv: [['Women', r[1]], ['Men', r[2]]] })] })) }];
+      case 'languages': return [
+        { title: 'Languages & scripts', cols: ['Language', 'Script', 'Unique letters', 'Giveaway words', "Don't confuse with"], rows: langs.map(l => [l.n, l.script, l.uniq, l.words, l.vs]),
+          groups: Object.entries(D.languages.groups).map(([g, label]) => ({ name: label, items: langs.filter(l => l.g[0] === g).map(l => ({ h: l.n, sub: l.script, kv: [['Letters', l.uniq], ['Words', l.words], ['Not', l.vs]] })) })) }];
+      case 'plates': return [
+        { title: 'License plates', cols: ['Country', 'Region', 'Current format', 'Tells & history'], rows: plates.map(p => [p.c, p.g, p.now, p.tell]),
+          groups: plateGroups.map(gr => ({ name: gr, items: plates.filter(p => p.g === gr).map(p => ({ h: p.c, kv: [['Now', p.now]], body: p.tell })) })) }];
       case 'logos': return [
-        { title: 'Logo changes', cols: ['Brand', 'Year', 'Change'], rows: brands.flatMap(b => b.timeline.map(([y, t]) => [b.b, y, t])) },
-        { title: 'Other dating clues', cols: ['Clue', 'Year', 'Note'], rows: D.logos.sheet_extra }];
-      case 'tips': return [{ title: 'Queue tips', cols: ['Topic', 'Tip'], rows: tipsAll().map(t => [t.cat, t.text]) }];
+        { title: 'Logo changes', cols: ['Brand', 'Year', 'Change'], rows: brands.flatMap(b => b.timeline.map(([y, t]) => [b.b, y, t])),
+          groups: brands.map(b => ({ name: b.b, items: b.timeline.map(([y, t]) => ({ tag: y, body: t })) })) }];
+      case 'landmarks': return [
+        { title: 'Landmarks: not before…', cols: ['Landmark', 'City', 'Region', 'Completed', 'Gone', 'Tell'], rows: marks.map(l => [l.n, l.city, l.g, l.y, l.gone || '', l.tell]),
+          groups: D.landmarks.regions.map(g => ({ name: g, items: marks.filter(l => l.g === g).sort((a, b) => a.y - b.y).map(l => ({ tag: markRange(l), h: l.n, sub: l.city, body: l.tell })) })) },
+        { title: 'By decade', cols: ['Decade', 'Landmarks'], rows: groupBy(marks.slice().sort((a, b) => a.y - b.y), l => decade(l.y)).map(([d, ls]) => [`${d}s`, ls.map(l => `${l.n} ${l.y}`).join(', ')]),
+          groups: groupBy(marks.slice().sort((a, b) => a.y - b.y), l => decade(l.y)).map(([d, ls]) => ({ name: `${d}s`, items: [({ body: ls.map(l => `${l.n} (${l.y})`).join(' · ') })] })) }];
     }
     return [];
   }
-  const SHEET_TABS = [['general', '🕰️ Era tells'], ['cars', '🚗 Cars'], ['outfits', '👗 Outfits'], ['languages', '🔤 Languages'], ['plates', '🚘 Plates'], ['logos', '🥤 Logos'], ['tips', '💡 Queue tips']];
+  function renderFact(f) {
+    return `<li class="fact">${f.tag != null ? `<span class="tag">${esc(f.tag)}</span>` : ''}${f.h ? `<b>${esc(f.h)}</b>${f.sub ? ` <small>${esc(f.sub)}</small>` : ''}${f.body || f.kv ? '<br>' : ''}` : ''}${f.body ? `<span>${esc(f.body)}</span>` : ''}${(f.kv || []).map(([k, v]) => `<div class="kv"><span>${esc(k)}</span>${esc(v)}</div>`).join('')}${f.note ? `<div class="note">${esc(f.note)}</div>` : ''}</li>`;
+  }
+  const SHEET_TABS = [['general', '🕰️ Era tells'], ['cars', '🚗 Cars'], ['outfits', '👗 Outfits'], ['landmarks', '🏙️ Landmarks'], ['languages', '🔤 Languages'], ['plates', '🚘 Plates'], ['logos', '🥤 Logos']];
   function viewSheets(id) {
     setNav('sheets');
-    id = id || 'general';
-    const tables = sheetTables(id);
-    app.innerHTML = `<section>
+    if (!SHEET_TABS.some(([k]) => k === id)) id = 'general';
+    const secs = sheetSections(id);
+    const about = (D[id] && D[id].about) || '';
+    app.innerHTML = `<section class="sheets">
       <h1>Cheat sheets</h1>
-      <p class="sub">The most important tells per mode. Download everything as one <a href="TimeTrainer_Cheatsheets.xlsx">Excel workbook</a>, or each table as CSV (opens in Google Sheets / Excel).</p>
       <div class="tabs">${SHEET_TABS.map(([k, l]) => `<a class="tab${k === id ? ' on' : ''}" href="#/sheets/${k}">${l}</a>`).join('')}</div>
-      <input class="search" id="flt" placeholder="Filter rows…">
-      ${tables.map((t, i) => `<div class="sheet"><div class="sheethead"><h2>${esc(t.title)}</h2><button class="btn sm" data-csv="${i}">CSV ⬇</button></div>
-        <div class="tablewrap"><table><thead><tr>${t.cols.map(c => `<th>${esc(c)}</th>`).join('')}</tr></thead><tbody>${t.rows.map(r => `<tr>${r.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan="${t.cols.length}">Nothing yet. ${id === 'tips' ? '<a href="#/tips">Import tips</a>' : ''}</td></tr>`}</tbody></table></div></div>`).join('')}
+      ${about ? `<p class="sub about">${esc(about)}</p>` : ''}
+      <div class="sheettools"><input class="search" id="flt" placeholder="Filter… (e.g. 1970, Japan, chrome)"><button class="btn sm" id="print">Print</button><a class="btn sm ghost" href="TimeTrainer_Cheatsheets.xlsx">Excel ⬇</a></div>
+      ${secs.map((t, i) => `<section class="sheet" data-sec>
+        <div class="sheethead"><h2>${esc(t.title)}</h2><button class="btn sm ghost" data-csv="${i}">CSV ⬇</button></div>
+        <div class="sgroups${t.one ? ' one' : ''}">${t.groups.map(g => `<div class="sgroup" data-g>
+          ${g.name ? `<h3>${esc(g.name)}</h3>` : ''}${g.lead ? `<p class="lead">${esc(g.lead)}</p>` : ''}
+          <${g.ordered ? 'ol' : 'ul'} class="facts">${g.items.map(renderFact).join('')}</${g.ordered ? 'ol' : 'ul'}></div>`).join('')}</div></section>`).join('')}
+      <p class="sub empty" id="none" hidden>Nothing matches.</p>
     </section>`;
-    $$('[data-csv]').forEach(b => b.onclick = () => { const t = tables[+b.dataset.csv]; download(`timetrainer-${id}-${t.title.toLowerCase().replace(/\W+/g, '-')}.csv`, '﻿' + [t.cols, ...t.rows].map(r => r.map(csvCell).join(',')).join('\n'), 'text/csv'); });
-    $('#flt').oninput = e => { const v = e.target.value.toLowerCase(); $$('tbody tr').forEach(tr => tr.style.display = tr.textContent.toLowerCase().includes(v) ? '' : 'none'); };
-  }
-
-  /* ---------------- queue tips ---------------- */
-  const TIPS = 'tt_tips_v1';
-  const TIP_CATS = [
-    ['Plates', /\bplates?\b|registration|licen[cs]e plate|number plate/i],
-    ['Cars & vehicles', /\bcars?\b|vehicle|truck|lorry|\bbus(es)?\b|tram|taxi|motorbike|scooter|bicycle|tuk|wheel|headlight/i],
-    ['Clothing', /cloth|fashion|dress|\bhats?\b|outfit|uniform|hair|shoe|skirt|\bsuit|jeans|wear|beard|moustache|glasses/i],
-    ['Language & script', /language|script|alphabet|cyrillic|latin|letter|\bwords?\b|spell|accent|diacritic|kanji|hangul|arabic|chinese|japanese|thai/i],
-    ['Logos, signs & brands', /logo|brand|advert|billboard|shop sign|signage|coca|pepsi|store|company|currency|price/i],
-    ['Photo quality', /photo|colou?r|black and white|b&w|sepia|film|camera|digital|grain|resolution|blurr|saturat/i],
-    ['Architecture', /building|architect|roof|church|mosque|temple|tower|skyscraper|house|bridge|brick|window|balcon/i],
-    ['Roads & infrastructure', /road|street|lamp|pole|bollard|traffic|driv|\brail|train|power line|sidewalk|pavement|lane|marking/i],
-    ['Nature & landscape', /tree|vegetat|climate|soil|mountain|snow|palm|landscape|desert|forest|beach|weather/i],
-    ['History & events', /\bwar\b|soldier|army|flag|protest|olympic|king|queen|president|revolution|empire|soviet|nazi|colonial/i]
-  ];
-  const categorize = t => (TIP_CATS.find(([, re]) => re.test(t)) || ['Other'])[0];
-  function tipText(t) {
-    if (typeof t === 'string') return t;
-    for (const k of ['text', 'tip', 'content', 'body', 'message', 'en']) if (typeof t[k] === 'string' && t[k].trim()) return t[k];
-    const s = Object.values(t).filter(v => typeof v === 'string').sort((a, b) => b.length - a.length)[0];
-    return s || JSON.stringify(t);
-  }
-  function tipsAll() {
-    const mine = store.get(TIPS, []);
-    const seen = new Set(); const out = [];
-    for (const t of [...(D.tips || []), ...mine]) {
-      const text = tipText(t).trim(); if (!text || seen.has(text.toLowerCase())) continue;
-      seen.add(text.toLowerCase());
-      out.push({ text, cat: categorize(text), by: t.submittedBy && (t.submittedBy.username || t.submittedBy) || t.by || null });
-    }
-    return out;
-  }
-  const SNIPPET = `(async () => {
-  // TimeTrainer tip exporter: run in the DevTools console on timeguessr.com while logged in.
-  const tips = [], seen = new Set(); let after, dupes = 0;
-  for (let i = 0; i < 3000 && dupes < 40; i++) {
-    const q = new URLSearchParams({ locale: 'en' });
-    if (after !== undefined) q.set('after', after);
-    const r = await fetch('/multiplayer/tip?' + q, { credentials: 'include' });
-    if (!r.ok) { console.warn('stopped with HTTP', r.status); break; }
-    const { tip } = await r.json();
-    if (!tip) break;
-    const key = tip.id ?? JSON.stringify(tip);
-    if (seen.has(key)) { if (tip.id !== undefined) break; dupes++; continue; }
-    seen.add(key); tips.push(tip); dupes = 0;
-    if (tip.id !== undefined) after = tip.id;
-    await new Promise(res => setTimeout(res, 300));
-  }
-  const json = JSON.stringify(tips, null, 1);
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
-  a.download = 'timeguessr-tips.json'; a.click();
-  try { await navigator.clipboard.writeText(json); } catch (e) { try { copy(json); } catch (_) {} }
-  console.log(tips.length + ' tips saved to timeguessr-tips.json (and copied)');
-})();`;
-  function viewTips() {
-    setNav('tips');
-    const all = tipsAll();
-    const done = new Set(store.get('tt_tips_done', []));
-    const cats = [...new Set(all.map(t => t.cat))].sort();
-    app.innerHTML = `<section>
-      <h1>💡 Queue tips</h1>
-      <p>While you queue for ranked, TimeGuessr shows community tips. They're the best hint of what knowledge the game expects.
-      The tips are only served to logged-in players, so you export them from your own browser:</p>
-      <ol class="steps">
-        <li>Log in on <a href="https://timeguessr.com/multiplayer" target="_blank" rel="noopener">timeguessr.com</a>.</li>
-        <li>Open the developer console (<kbd>F12</kbd> → Console. Chrome may ask you to type <code>allow pasting</code> first).</li>
-        <li>Paste this script and press Enter. It walks through every tip and downloads <code>timeguessr-tips.json</code>. Read the script before you run it: it only reads tips and saves them.</li>
-      </ol>
-      <div class="code"><button class="btn sm" id="cp">Copy script</button><pre>${esc(SNIPPET)}</pre></div>
-      <h2>Import</h2>
-      <p class="sub">Choose the downloaded JSON file, or paste JSON or plain text (one tip per line). Tips are stored in this browser. Commit the file as <code>timetrainer/data/tips.json</code> and rebuild to share them with your teammate.</p>
-      <div class="row"><input type="file" id="file" accept=".json,.txt"><button class="btn" id="exp">Export JSON</button><button class="btn" id="rand">Random tip 🎲</button></div>
-      <textarea id="paste" rows="4" placeholder="Paste tips here…"></textarea>
-      <div class="row"><button class="btn primary" id="imp">Import pasted text</button><button class="btn ghost" id="clr">Clear my imported tips</button></div>
-      <div id="flash"></div>
-      <h2>${all.length} tips <small>${done.size} marked learned</small></h2>
-      <input class="search" id="flt" placeholder="Search tips…">
-      ${cats.map(c => `<details open class="tipcat"><summary>${esc(c)} <small>${all.filter(t => t.cat === c).length}</small></summary><ul class="tips">${all.filter(t => t.cat === c).map(t => `<li><label><input type="checkbox" data-t="${esc(t.text)}"${done.has(t.text) ? ' checked' : ''}> <span>${esc(t.text)}</span>${t.by ? ` <small>by ${esc(t.by)}</small>` : ''}</label></li>`).join('')}</ul></details>`).join('') || '<p class="sub">No tips yet.</p>'}
-    </section>`;
-    $('#cp').onclick = () => copyText(SNIPPET);
-    const add = items => { const mine = store.get(TIPS, []); store.set(TIPS, mine.concat(items)); toast(items.length + ' tips imported'); viewTips(); };
-    const parse = txt => { txt = txt.trim(); if (!txt) return []; try { const j = JSON.parse(txt); return Array.isArray(j) ? j : (j.tips || [j]); } catch (e) { return txt.split(/\n+/).map(s => s.trim()).filter(s => s.length > 3); } };
-    $('#imp').onclick = () => add(parse($('#paste').value));
-    $('#file').onchange = e => { const f = e.target.files[0]; if (f) f.text().then(t => add(parse(t))); };
-    $('#exp').onclick = () => download('timetrainer-tips.json', JSON.stringify(tipsAll().map(t => ({ text: t.text, cat: t.cat, by: t.by })), null, 1), 'application/json');
-    $('#clr').onclick = () => { if (confirm('Remove all tips you imported in this browser?')) { store.set(TIPS, []); viewTips(); } };
-    $('#rand').onclick = () => { const t = all[Math.floor(Math.random() * all.length)]; $('#flash').innerHTML = t ? `<div class="card flash"><small>${esc(t.cat)}</small><p>${esc(t.text)}</p></div>` : ''; };
-    $$('[data-t]').forEach(cb => cb.onchange = () => { const s = new Set(store.get('tt_tips_done', [])); cb.checked ? s.add(cb.dataset.t) : s.delete(cb.dataset.t); store.set('tt_tips_done', [...s]); });
-    $('#flt').oninput = e => { const v = e.target.value.toLowerCase(); $$('.tips li').forEach(li => li.style.display = li.textContent.toLowerCase().includes(v) ? '' : 'none'); };
+    $$('[data-csv]').forEach(b => b.onclick = () => { const t = secs[+b.dataset.csv]; download(`timetrainer-${id}-${t.title.toLowerCase().replace(/\W+/g, '-').replace(/-$/, '')}.csv`, '﻿' + [t.cols, ...t.rows].map(r => r.map(csvCell).join(',')).join('\n'), 'text/csv'); });
+    $('#print').onclick = () => window.print();
+    $('#flt').oninput = e => {
+      const v = e.target.value.trim().toLowerCase(); let any = false;
+      $$('[data-sec]').forEach(sec => {
+        let secAny = false;
+        $$('[data-g]', sec).forEach(gr => {
+          const head = (($('h3', gr) || {}).textContent || '') + ' ' + (($('.lead', gr) || {}).textContent || '');
+          const whole = !v || head.toLowerCase().includes(v);
+          let n = 0;
+          $$('.fact', gr).forEach(li => { const show = whole || li.textContent.toLowerCase().includes(v); li.hidden = !show; n += show; });
+          gr.hidden = !n; secAny = secAny || n > 0;
+        });
+        sec.hidden = !secAny; any = any || secAny;
+      });
+      $('#none').hidden = any;
+    };
   }
 
   /* ---------------- progress ---------------- */
@@ -544,7 +616,7 @@
 
   /* ------------------------------------------------------------ router */
   function route() {
-    if (game) game.token = Symbol(); // cancel pending loads
+    if (game) { game.token = Symbol(); clearInterval(game.timerId); } // cancel pending loads and the round timer
     const [path, qs] = (location.hash.slice(1) || '/').split('?');
     const parts = path.split('/').filter(Boolean);
     const q = new URLSearchParams(qs || '');
@@ -554,7 +626,6 @@
       case 'play': return viewPlay(parts[1], q);
       case 'learn': return viewLearn(parts[1]);
       case 'sheets': return viewSheets(parts[1]);
-      case 'tips': return viewTips();
       case 'stats': return viewStats();
       default: game = null; return viewHome();
     }

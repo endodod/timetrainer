@@ -10,23 +10,12 @@ from openpyxl.utils import get_column_letter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 D = {m: json.load(open(os.path.join(ROOT, "data", m + ".json"), encoding="utf-8"))
-     for m in ["cars", "outfits", "languages", "plates", "logos", "general"]}
-tips_path = os.path.join(ROOT, "data", "tips.json")
-TIPS = json.load(open(tips_path, encoding="utf-8")) if os.path.exists(tips_path) else []
+     for m in ["cars", "outfits", "languages", "plates", "logos", "landmarks", "general"]}
 
 HEAD = PatternFill("solid", fgColor="E8A33D")
 TITLE = Font(bold=True, size=14)
 BOLD = Font(bold=True)
 WRAP = Alignment(wrap_text=True, vertical="top")
-
-
-def tip_text(t):
-    if isinstance(t, str):
-        return t
-    for k in ("text", "tip", "content", "body", "message", "en"):
-        if isinstance(t.get(k), str) and t[k].strip():
-            return t[k]
-    return json.dumps(t, ensure_ascii=False)
 
 
 def add_sheet(wb, name, about, tables, widths):
@@ -79,8 +68,11 @@ def main():
         ("Logo changes", ["Brand", "Year", "Change"], [[b["b"], y, t] for b in lg["brands"] for y, t in b["timeline"]]),
         ("Other dating clues", ["Clue", "Year", "Note"], lg["sheet_extra"]),
     ], [26, 8, 90])
-    add_sheet(wb, "Queue tips", "Tips shown by TimeGuessr while queueing (import them on the Queue tips page, save as data/tips.json, rebuild).",
-              [("Queue tips", ["Tip"], [[tip_text(t)] for t in TIPS] or [["(none imported yet)"]])], [120])
+    lm = D["landmarks"]
+    add_sheet(wb, "Landmarks", lm["about"], [
+        ("Landmarks: not before…", ["Landmark", "City", "Region", "Completed", "Gone", "Tell"],
+         [[x["n"], x["city"], x["g"], x["y"], x.get("gone") or "", x["tell"]] for x in sorted(lm["items"], key=lambda x: (lm["regions"].index(x["g"]), x["y"]))]),
+    ], [34, 20, 20, 11, 8, 80])
     out = os.path.join(ROOT, "TimeTrainer_Cheatsheets.xlsx")
     wb.save(out)
     print("wrote", out)

@@ -16,7 +16,7 @@ UA = "TimeTrainer/1.0 (personal study tool; python urllib)"
 WP = "https://en.wikipedia.org/w/api.php"
 COMMONS = "https://commons.wikimedia.org/w/api.php"
 
-MODES = ["cars", "outfits", "languages", "plates", "logos", "general"]
+MODES = ["cars", "outfits", "languages", "plates", "logos", "landmarks", "general"]
 
 
 def load(name):
@@ -152,6 +152,8 @@ def fetch_images(data):
     imgs = {"lead": {}, "gallery": {}, "logos": {}}
     print("cars: lead images", file=sys.stderr)
     imgs["lead"].update(lead_images([c["w"] for c in data["cars"]["items"]]))
+    print("landmarks: lead images", file=sys.stderr)
+    imgs["lead"].update(lead_images([l["w"] for l in data["landmarks"]["items"]]))
     print("plates: galleries", file=sys.stderr)
     for p in data["plates"]["items"]:
         imgs["gallery"][p["w"]] = gallery(p["w"], allow_svg=True)
@@ -166,8 +168,6 @@ def fetch_images(data):
 
 def main():
     data = {m: load(m) for m in MODES}
-    tips_path = os.path.join(DATA, "tips.json")
-    data["tips"] = json.load(open(tips_path, encoding="utf-8")) if os.path.exists(tips_path) else []
     img_path = os.path.join(DATA, "images.json")
     if "--fetch" in sys.argv:
         imgs = fetch_images(data)
