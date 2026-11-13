@@ -1,0 +1,28 @@
+{
+  "title": "Uniforms & helmets",
+  "about": "Soldiers date a photo almost to the war: helmet shapes changed with each conflict and camouflage patterns changed every 10–20 years. Years are when the item was standard issue; reservists and other armies often kept them longer.",
+  "kinds": ["Helmet", "Headgear", "Camouflage"],
+  "items": [
+    {"n": "Pickelhaube", "w": "Pickelhaube", "f": 1900, "t": 1918, "k": "Helmet", "army": "Germany", "tell": "Spiked leather helmet; replaced in the trenches by the Stahlhelm from 1916"},
+    {"n": "Brodie helmet", "w": "Brodie helmet", "f": 1915, "t": 1945, "k": "Helmet", "army": "UK, Commonwealth, US (M1917)", "tell": "Shallow 'soup bowl' with a wide brim: WW1 Tommies, still used in WW2"},
+    {"n": "Adrian helmet", "w": "Adrian helmet", "f": 1915, "t": 1945, "k": "Helmet", "army": "France, Belgium, Italy and others", "tell": "Crest ridge on top, peaks front and back, badge on the front"},
+    {"n": "Stahlhelm", "w": "Stahlhelm", "f": 1916, "t": 1945, "k": "Helmet", "army": "Germany", "tell": "'Coal scuttle' with flared neck guard: WW1 (from 1916) and WW2"},
+    {"n": "SSh-40", "w": "SSh-40", "f": 1940, "t": 1990, "k": "Helmet", "army": "Soviet Union, Warsaw Pact", "tell": "Round Soviet steel helmet with a small rim, used for 50 years"},
+    {"n": "M1 helmet", "w": "M1 helmet", "f": 1941, "t": 1985, "k": "Helmet", "army": "United States, NATO allies", "tell": "Round steel pot, often with net or cloth cover: WW2, Korea, Vietnam"},
+    {"n": "PASGT helmet", "w": "Personnel Armor System for Ground Troops", "f": 1983, "t": 2005, "k": "Helmet", "army": "United States", "tell": "Kevlar 'Fritz' with a lip over the ears and neck: Grenada to early Iraq"},
+    {"n": "Advanced Combat Helmet", "w": "Advanced Combat Helmet", "f": 2003, "t": null, "k": "Helmet", "army": "United States", "tell": "Smaller cut, no brim, night-vision mount on the front, pads inside"},
+    {"n": "Budenovka", "w": "Budenovka", "f": 1919, "t": 1940, "k": "Headgear", "army": "Red Army", "tell": "Pointed cloth helmet with a big red star: Russian Civil War and 1920s–30s"},
+    {"n": "Boonie hat", "w": "Boonie hat", "f": 1967, "t": null, "k": "Headgear", "army": "United States and many others", "tell": "Soft wide-brim jungle hat, first in Vietnam"},
+    {"n": "Splittertarnmuster", "w": "Splittertarnmuster", "f": 1931, "t": 1945, "k": "Camouflage", "army": "Germany", "tell": "Sharp-edged 'splinter' shapes with rain streaks: Wehrmacht smocks and tent sheets"},
+    {"n": "Tigerstripe", "w": "Tigerstripe", "f": 1962, "t": 1975, "k": "Camouflage", "army": "South Vietnam, US special forces", "tell": "Horizontal black brush strokes on green and brown"},
+    {"n": "ERDL pattern", "w": "ERDL pattern", "f": 1967, "t": 1981, "k": "Camouflage", "army": "United States", "tell": "Green and brown leaf shapes with black branches: late Vietnam"},
+    {"n": "DPM", "w": "Disruptive Pattern Material", "f": 1966, "t": 2011, "k": "Camouflage", "army": "United Kingdom and Commonwealth", "tell": "British brush-stroke woodland camo, replaced by MTP around 2010"},
+    {"n": "US Woodland", "w": "U.S. Woodland", "f": 1981, "t": 2008, "k": "Camouflage", "army": "United States", "tell": "Large green, brown, black and sand blobs: 1980s–2000s US troops"},
+    {"n": "Six-colour 'chocolate chip' desert", "w": "Desert Battle Dress Uniform", "f": 1982, "t": 1995, "k": "Camouflage", "army": "United States", "tell": "Sand with brown blobs and black-and-white 'chips': Gulf War 1991"},
+    {"n": "Three-colour desert (DCU)", "w": "Desert Camouflage Uniform", "f": 1992, "t": 2008, "k": "Camouflage", "army": "United States", "tell": "Plain sand, tan and brown: Somalia, Afghanistan 2001, Iraq 2003"},
+    {"n": "Flecktarn", "w": "Flecktarn", "f": 1990, "t": null, "k": "Camouflage", "army": "Germany, Denmark", "tell": "Dense small dots of green, brown and black"},
+    {"n": "MARPAT", "w": "MARPAT", "f": 2002, "t": null, "k": "Camouflage", "army": "US Marines", "tell": "Pixelated digital woodland or desert"},
+    {"n": "MultiCam", "w": "MultiCam", "f": 2002, "t": null, "k": "Camouflage", "army": "US Army (as OCP from 2015), UK (MTP), Australia", "tell": "Soft blended tan, green and brown: Afghanistan 2010+"},
+    {"n": "UCP (US Army digital)", "w": "Universal Camouflage Pattern", "f": 2004, "t": 2019, "k": "Camouflage", "army": "United States", "tell": "Grey-green pixels: US Army in Iraq/Afghanistan 2005–2014"}
+  ]
+}

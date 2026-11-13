@@ -12,6 +12,10 @@ Picture-based training for **TimeGuessr** (1900–today), made for practising 2v
 | 🚘 Plates | Current and historic plates for 59 countries | Country (4 choices from the same region) |
 | 🥤 Logos | Historic logo files (Coca-Cola, Pepsi, Shell, BP, VW, Apple, Nokia, …) | Years the design was in use (slider) |
 | 🏙️ Landmarks | 67 towers, bridges and buildings 1902–2019 (Twin Towers, Burj Khalifa, Shard, Pudong, …) | Year completed (slider) |
+| 📷 Photo era | Photos from the Wikipedia decade articles 1900s–2010s | Year, from the photo's look alone (slider) |
+| 🪖 Uniforms & helmets | 21 helmets, headgear and camouflage patterns (Pickelhaube → UCP) | Years in use (slider) or name (4 choices) |
+| 🌍 Where is it? | A plate photo or street signs plus text clues (driving side, currency, web domain, other tells) for 60 countries | Country (4 choices from the same region) |
+| 🧩 Newest clue | A scene with 3–4 dated clues (objects, events, cars, landmarks; optionally as photos) | Earliest possible year (slider) |
 | 📅 Timeline | 4 pictures (cars, landmarks, or logos of one brand) | Order them oldest → newest |
 | 🏆 Gauntlet | Mix of all of the above | — |
 
@@ -39,7 +43,7 @@ your browser. If nothing loads, check that an ad/privacy blocker isn't blocking 
 
 ## Editing content
 
-All content is in `data/*.json` (`cars`, `outfits`, `languages`, `plates`, `logos`, `landmarks`, `general`).
+All content is in `data/*.json` (`cars`, `outfits`, `languages`, `plates`, `logos`, `landmarks`, `countries`, `clues`, `photos`, `military`, `general`).
 After editing, rebuild the bundle and the Excel file:
 
 ```bash

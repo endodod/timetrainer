@@ -16,7 +16,7 @@ UA = "TimeTrainer/1.0 (personal study tool; python urllib)"
 WP = "https://en.wikipedia.org/w/api.php"
 COMMONS = "https://commons.wikimedia.org/w/api.php"
 
-MODES = ["cars", "outfits", "languages", "plates", "logos", "landmarks", "general"]
+MODES = ["cars", "outfits", "languages", "plates", "logos", "landmarks", "countries", "clues", "photos", "military", "general"]
 
 
 def load(name):
@@ -157,6 +157,11 @@ def fetch_images(data):
     print("plates: galleries", file=sys.stderr)
     for p in data["plates"]["items"]:
         imgs["gallery"][p["w"]] = gallery(p["w"], allow_svg=True)
+    print("military: lead images", file=sys.stderr)
+    imgs["lead"].update(lead_images([m["w"] for m in data["military"]["items"]]))
+    print("photo era: galleries", file=sys.stderr)
+    for a in data["photos"]["decades"]:
+        imgs["gallery"][a["w"]] = gallery(a["w"])
     print("outfits: galleries", file=sys.stderr)
     for a in data["outfits"]["articles"]:
         imgs["gallery"][a["w"]] = gallery(a["w"])

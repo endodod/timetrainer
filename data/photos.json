@@ -1,0 +1,18 @@
+{
+  "title": "Photo era",
+  "about": "Date a photo from its look alone: grain, colour, sharpness, framing. Pictures come from the Wikipedia decade articles; when the file has a date you need the exact year, otherwise anything in the decade counts.",
+  "decades": [
+    {"w": "1900s (decade)", "f": 1900, "t": 1909, "look": "Black & white glass plates, very sharp in daylight, stiff poses, ghostly blur on moving people"},
+    {"w": "1910s", "f": 1910, "t": 1919, "look": "Black & white or sepia; WW1 press photos; first autochromes (soft, grainy, pastel colour)"},
+    {"w": "1920s", "f": 1920, "t": 1929, "look": "Black & white, softer press photos, more amateur snapshots (Kodak Brownie)"},
+    {"w": "1930s", "f": 1930, "t": 1939, "look": "Sharper 35 mm street shots (Leica); Kodachrome colour slides from 1936"},
+    {"w": "1940s", "f": 1940, "t": 1949, "look": "Mostly black & white war photography; rare, very saturated Kodachrome"},
+    {"w": "1950s", "f": 1950, "t": 1959, "look": "Black & white press photos; saturated Kodachrome/Ektachrome in travel shots and ads"},
+    {"w": "1960s", "f": 1960, "t": 1969, "look": "Colour snapshots spread; square prints with white borders; B&W still common in the press"},
+    {"w": "1970s", "f": 1970, "t": 1979, "look": "Warm, faded orange/yellow colour cast, soft grain, muted greens"},
+    {"w": "1980s", "f": 1980, "t": 1989, "look": "Bright on-camera flash, red-eye, saturated colour film, orange date stamps"},
+    {"w": "1990s", "f": 1990, "t": 1999, "look": "Clean colour film, disposable cameras, date stamps; first digital cameras late in the decade"},
+    {"w": "2000s", "f": 2000, "t": 2009, "look": "Early digital: low resolution, blown-out skies, purple fringing, noisy night shots"},
+    {"w": "2010s", "f": 2010, "t": 2019, "look": "Sharp HDR phone photos, wide-angle, portrait-mode blur, Instagram filters"}
+  ]
+}

@@ -165,6 +165,19 @@ table { border-collapse: collapse; width: 100%; font-size: .88rem; }
 th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
 table.mini { font-size: .85rem; }
 
+/* location + clue scenes */
+.clueboard, .scene { width: 100%; background: var(--panel); padding: 16px; display: grid; gap: 12px; }
+.clueboard .media img { max-height: 40vh; }
+.clueboard .signs { border-radius: 10px; }
+.cluelist { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.cluelist li, .sc { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; display: flex; gap: 10px; align-items: center; }
+.cluelist li span, .sc .ic { font-size: 1.3rem; }
+.scene { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.sc { font-size: 1.02rem; }
+.sc.pic { margin: 0; padding: 0; overflow: hidden; flex-direction: column; align-items: stretch; gap: 0; }
+.sc.pic img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; background: #000; }
+.sc.pic figcaption { padding: 8px 10px; font-size: .9rem; }
+
 /* timeline (order) mode */
 .ogrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
 .ocard { position: relative; padding: 0; border: 2px solid var(--line); border-radius: var(--r); overflow: hidden; background: var(--panel); cursor: pointer; display: flex; flex-direction: column; color: var(--ink); font: inherit; }

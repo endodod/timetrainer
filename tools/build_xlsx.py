@@ -10,7 +10,7 @@ from openpyxl.utils import get_column_letter
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 D = {m: json.load(open(os.path.join(ROOT, "data", m + ".json"), encoding="utf-8"))
-     for m in ["cars", "outfits", "languages", "plates", "logos", "landmarks", "general"]}
+     for m in ["cars", "outfits", "languages", "plates", "logos", "landmarks", "countries", "clues", "photos", "military", "general"]}
 
 HEAD = PatternFill("solid", fgColor="E8A33D")
 TITLE = Font(bold=True, size=14)
@@ -73,6 +73,26 @@ def main():
         ("Landmarks: not before…", ["Landmark", "City", "Region", "Completed", "Gone", "Tell"],
          [[x["n"], x["city"], x["g"], x["y"], x.get("gone") or "", x["tell"]] for x in sorted(lm["items"], key=lambda x: (lm["regions"].index(x["g"]), x["y"]))]),
     ], [34, 20, 20, 11, 8, 80])
+    cl = D["clues"]
+    add_sheet(wb, "Clues", cl["about"], [
+        ("Not before… (and gone after)", ["Clue", "Category", "From", "Until"],
+         [[x["c"], x["cat"], x["f"], x.get("t") or ""] for x in sorted(cl["items"], key=lambda x: x["f"])]),
+    ], [55, 18, 8, 8])
+    ph = D["photos"]
+    add_sheet(wb, "Photo era", ph["about"], [
+        ("The look of each decade", ["Decade", "Look"], [[f'{d["f"]}s', d["look"]] for d in ph["decades"]]),
+    ], [10, 100])
+    mi = D["military"]
+    add_sheet(wb, "Military", mi["about"], [
+        ("Uniforms & helmets", ["Name", "Kind", "Army", "From", "To", "Tell"],
+         [[x["n"], x["k"], x["army"], x["f"], x["t"] or "today", x["tell"]] for x in sorted(mi["items"], key=lambda x: (mi["kinds"].index(x["k"]), x["f"]))]),
+    ], [30, 12, 30, 7, 7, 70])
+    plate_g = {x["c"]: x["g"] for x in p["items"]}
+    co = D["countries"]
+    add_sheet(wb, "Countries", co["about"], [
+        ("Country tells", ["Country", "Region", "Drives", "Currency", "Web", "Tell"],
+         [[x["c"], plate_g.get(x["c"], ""), x["d"], x["cur"], x["tld"], x["x"]] for x in co["items"]]),
+    ], [18, 18, 22, 50, 22, 60])
     out = os.path.join(ROOT, "TimeTrainer_Cheatsheets.xlsx")
     wb.save(out)
     print("wrote", out)

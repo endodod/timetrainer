@@ -113,11 +113,23 @@
     return ok.length >= 4 ? ok.slice(0, 4) : null;
   }
 
-  async function outfitPool() {
-    const lists = await Promise.all(outfitArts.map(a => Wiki.gallery(a.w)));
+  const countries = D.countries.items.filter(c => plates.some(p => p.c === c.c));
+  const plateByC = Object.fromEntries(plates.map(p => [p.c, p]));
+  const langById = Object.fromEntries(langs.map(l => [l.id, l]));
+  const mil = D.military.items;
+  const photoDecs = D.photos.decades;
+  const CLUE_ICONS = { Transport: '✈️', 'Events & politics': '📜', Objects: '🧸', Street: '🛣️', People: '🧍', Money: '💶', Tech: '📱' };
+  const cluePool = D.clues.items.map(x => ({ text: x.c, f: x.f, t: x.t, cat: x.cat, icon: CLUE_ICONS[x.cat] || '•' }))
+    .concat(cars.map(c => ({ text: `${c.n} parked on the street`, f: c.f, cat: 'Cars', icon: '🚗', w: c.w, what: 'This car' })))
+    .concat(marks.map(l => ({ text: `${l.n} on the skyline`, f: l.y, t: l.gone, cat: 'Landmarks', icon: '🏙️', w: l.w, what: 'This landmark' })));
+  // Currency without the country adjective ('Swiss franc CHF' -> 'franc CHF') and without its history.
+  const money = cur => cur.split(' (')[0].replace(/ since \d+/, '').replace(/^([A-Z][\w]*\s)+(?=[a-zł])/, '');
+
+  async function outfitPool(arts = outfitArts) {
+    const lists = await Promise.all(arts.map(a => Wiki.gallery(a.w)));
     const pool = [];
     lists.forEach((list, i) => {
-      const a = outfitArts[i];
+      const a = arts[i];
       list.forEach(img => {
         const exact = img.year && img.year >= a.f && img.year <= a.t;
         pool.push({ img, f: exact ? img.year : a.f, t: exact ? img.year : a.t, art: a });
@@ -226,6 +238,82 @@
         return { key: 'landmarks:' + l.w, label: l.n, media: figure(img, 'a landmark'), img, prompt: 'When was this completed?', kind: 'year', f: l.y, t: l.y, reveal };
       }
     },
+    photos: {
+      icon: '📷', title: 'Photo era', blurb: 'Date a photo from its look alone: grain, colour cast, sharpness, flash. Pictures from the Wikipedia decade articles.',
+      types: [{ id: 'year', label: 'Guess the year (slider)' }],
+      async question(rng, s, weight) {
+        const pool = await (this._pool || (this._pool = outfitPool(photoDecs)));
+        if (!pool.length) { this._pool = null; return null; }
+        const it = weightedPick(rng, pool, x => weight('photos:' + x.img.file));
+        const dec = photoDecs.find(d => it.f >= d.f && it.f <= d.t) || it.art;
+        const reveal = `<b>${it.f === it.t ? it.f : range(it.f, it.t)}</b>${it.img.desc ? `<br><span class="desc">${esc(it.img.desc)}</span>` : ''}<br><span class="tell">Look of the ${dec.f}s: ${esc(dec.look)}</span>`;
+        return { key: 'photos:' + it.img.file, label: it.img.file.replace(/^File:/, ''), media: figure(it.img, 'historic photo'), img: it.img, prompt: 'Which year is this photo from?', kind: 'year', f: it.f, t: it.t, reveal };
+      }
+    },
+    uniforms: {
+      icon: '🪖', title: 'Uniforms & helmets', blurb: 'Helmets and camouflage date soldiers to the war: Pickelhaube, Brodie, Stahlhelm, M1, PASGT, Woodland, desert, digital…',
+      types: [{ id: 'year', label: 'When was it in use? (slider)' }, { id: 'name', label: 'Name it (4 choices)' }],
+      filters: [{ id: 'all', label: 'All' }].concat(D.military.kinds.map(k => ({ id: k, label: k }))),
+      async question(rng, s, weight) {
+        const pool = s.filter && s.filter !== 'all' ? mil.filter(x => x.k === s.filter) : mil;
+        const it = weightedPick(rng, pool, x => weight('uniforms:' + x.w));
+        const img = await Wiki.lead(it.w);
+        if (!img) return null;
+        const reveal = `<b>${esc(it.n)}</b> · ${esc(it.army)} · ${range(it.f, it.t)}<br><span class="tell">${esc(it.tell)}</span>`;
+        const base = { key: 'uniforms:' + it.w, label: it.n, media: figure(img, it.k.toLowerCase()), img, reveal };
+        if (s.type === 'name') {
+          const opts = shuffle(rng, [it, ...shuffle(rng, mil.filter(x => x !== it && x.k === it.k)).slice(0, 3)]);
+          return Object.assign(base, { prompt: `Which ${it.k.toLowerCase()} is this?`, kind: 'choice', options: opts.map(o => ({ id: o.w, label: o.n })), answer: it.w });
+        }
+        return Object.assign(base, { prompt: `When was this ${it.k.toLowerCase()} in use?`, kind: 'year', f: it.f, t: it.t == null ? NOW : it.t });
+      }
+    },
+    location: {
+      icon: '🌍', title: 'Where is it?', noLearn: true, blurb: 'Location before year: name the country from signs, plates, driving side, currency and web addresses.',
+      types: [{ id: 'country', label: 'Which country? (4 choices)' }],
+      filters: [{ id: 'all', label: 'All' }].concat(plateGroups.map(g => ({ id: g, label: g }))),
+      async question(rng, s, weight) {
+        const pool = s.filter && s.filter !== 'all' ? countries.filter(c => plateByC[c.c].g === s.filter) : countries;
+        const c = weightedPick(rng, pool, x => weight('location:' + x.c));
+        const p = plateByC[c.c];
+        let img = null, pic = '';
+        if (!c.l.length || rng() < 0.5) {
+          const gal = await Wiki.gallery(p.w, { allowSvg: true });
+          if (gal.length) { img = pick(rng, gal); pic = figure(img, 'license plate'); }
+        }
+        if (!pic && c.l.length) { const l = langById[pick(rng, c.l)]; pic = signs(shuffle(rng, l.s).slice(0, 2), rng); }
+        const text = shuffle(rng, [['🚗', `Traffic drives on the ${c.d.split(' ')[0].toLowerCase()}`], ['💰', `Price tags: ${money(c.cur)}`], ['🌐', `Web addresses on signs: ${c.tld.split(' (')[0]}`], ['👀', c.x]]).slice(0, pic ? 2 : 3);
+        const opts = shuffle(rng, [c, ...shuffle(rng, countries.filter(x => x !== c && plateByC[x.c].g === p.g)).slice(0, 3)]);
+        const media = `<div class="clueboard">${pic}<ul class="cluelist">${text.map(([i, t]) => `<li><span>${i}</span>${esc(t)}</li>`).join('')}</ul></div>`;
+        const reveal = `<b>${esc(c.c)}</b><br><span class="tell">Drives: ${esc(c.d)}<br>Money: ${esc(c.cur)}<br>Web: ${esc(c.tld)}<br>Plates: ${esc(p.now)}<br>${esc(c.x)}</span>`;
+        return { key: 'location:' + c.c, label: c.c, media, img, prompt: 'Which country is this?', kind: 'choice', options: opts.map(o => ({ id: o.c, label: o.c })), answer: c.c, reveal };
+      }
+    },
+    clues: {
+      icon: '🧩', title: 'Newest clue', noLearn: true, blurb: 'A scene with 3–4 clues: find the newest one and name the earliest year the photo could be from.',
+      types: [{ id: 'named', label: 'Clues as text' }, { id: 'pics', label: 'Cars & landmarks as photos (harder)' }],
+      async question(rng, s) {
+        const src = pick(rng, ['obj', 'obj', 'car', 'mark']);
+        const targets = cluePool.filter(x => x.f >= 1915 && (src === 'car' ? x.cat === 'Cars' : src === 'mark' ? x.cat === 'Landmarks' : !x.w));
+        const target = pick(rng, targets);
+        const cats = new Set([target.cat]); const others = [];
+        for (const x of shuffle(rng, cluePool)) {
+          if (others.length === (rng() < 0.5 ? 2 : 3)) break;
+          if (x.f <= target.f - 4 && (x.t == null || x.t >= target.f) && !cats.has(x.cat)) { others.push(x); cats.add(x.cat); }
+        }
+        if (others.length < 2) return null;
+        const scene = shuffle(rng, [target, ...others]).map(x => Object.assign({}, x));
+        if (s.type === 'pics') {
+          const imgs = await Promise.all(scene.map(x => x.w ? Wiki.lead(x.w) : null));
+          scene.forEach((x, i) => { x.img = imgs[i]; });
+        }
+        const media = `<div class="scene">${scene.map(x => x.img
+          ? `<figure class="sc pic"><img src="${esc(x.img.src)}" alt=""><figcaption>${x.icon} ${x.what} is in the photo</figcaption></figure>`
+          : `<div class="sc"><span class="ic">${x.icon}</span>${esc(x.text)}</div>`).join('')}</div>`;
+        const reveal = `The newest clue sets the floor:<ol class="timeline">${scene.slice().sort((a, b) => b.f - a.f).map(x => `<li${x === scene.find(y => y.text === target.text) ? ' class="hit"' : ''}><b>${x.f}${x.t ? '–' + x.t : '+'}</b> ${esc(x.text)}</li>`).join('')}</ol>`;
+        return { key: null, label: target.text, media, imgs: scene.map(x => x.img).filter(Boolean), prompt: 'What is the earliest year this photo could be from?', kind: 'year', f: target.f, t: target.f, reveal };
+      }
+    },
     timeline: {
       icon: '📅', title: 'Timeline', noLearn: true, blurb: 'Put 4 pictures in order, oldest to newest. Trains the core skill: spotting which thing in a photo is the newest.',
       types: [{ id: 'mixed', label: 'Cars + landmarks' }, { id: 'cars', label: 'Cars only' }, { id: 'landmarks', label: 'Landmarks only' }, { id: 'logos', label: 'Logos of one brand' }],
@@ -241,8 +329,8 @@
       icon: '🏆', title: 'Gauntlet (mixed)', noLearn: true, blurb: 'Everything mixed like a real round: cars, outfits, landmarks, logos, plates and languages.',
       types: [{ id: 'mix', label: 'Mixed' }],
       async question(rng, s, weight) {
-        const m = pick(rng, ['cars', 'cars', 'outfits', 'outfits', 'landmarks', 'logos', 'plates', 'languages']);
-        const type = { cars: rng() < 0.6 ? 'year' : 'model', outfits: 'year', landmarks: 'year', logos: 'year', plates: 'country', languages: 'lang' }[m];
+        const m = pick(rng, ['cars', 'cars', 'outfits', 'outfits', 'photos', 'landmarks', 'uniforms', 'logos', 'plates', 'languages', 'location', 'clues']);
+        const type = { cars: rng() < 0.6 ? 'year' : 'model', outfits: 'year', photos: 'year', landmarks: 'year', uniforms: 'year', logos: 'year', plates: 'country', languages: 'lang', location: 'country', clues: 'named' }[m];
         const q = await MODES[m].question.call(MODES[m], rng, { type, filter: 'all' }, missWeight(m));
         if (q) q.sub = m;
         return q;
@@ -284,7 +372,7 @@
         <div class="crumb"><a href="#/">Train</a> / ${m.title}</div>
         <h1>${m.icon} ${m.title}</h1>
         <p>${m.blurb}</p>
-        <p class="sub">${esc((D[id] && D[id].about) || '')}</p>
+        <p class="sub">${esc((D[SHEET_DATA[id] || id] || {}).about || '')}</p>
         <form id="setup" class="setup">
           ${sel('Type', m.types, last.type)}
           ${m.filters ? sel('Filter', m.filters, last.filter) : ''}
@@ -293,7 +381,7 @@
           <div class="row">
             <button class="btn primary" type="submit">Start ▶</button>
             <button class="btn" type="button" id="challenge">Challenge link 🔗</button>
-            ${!m.noLearn ? `<a class="btn ghost" href="#/learn/${id}">Learn gallery</a><a class="btn ghost" href="#/sheets/${id}">Cheat sheet</a>` : ''}
+            ${!m.noLearn ? `<a class="btn ghost" href="#/learn/${id}">Learn gallery</a>` : ''}${hasSheet(id) ? `<a class="btn ghost" href="#/sheets/${id}">Cheat sheet</a>` : ''}
           </div>
         </form>
       </section>`;
@@ -323,6 +411,7 @@
     return `<div class="hud"><span>${g.m.icon} ${g.m.title}${q && q.sub ? ' · ' + MODES[q.sub].title : ''}${g.seed ? ` · <span class="pill">challenge ${esc(g.seed)}</span>` : ''}</span>
       <span>${g.limit && clock ? `<span class="clock" id="clock">⏱ ${g.limit}s</span> ` : ''}<span id="score">Round ${g.round}${g.n ? '/' + g.n : ''} · <b>${g.total}</b> pts</span></span></div>`;
   }
+  const roundImgs = q => (q.imgs || (q.items ? q.items.map(x => x.img) : [q.img])).filter(Boolean);
   const preload = src => new Promise(res => { const im = new Image(); im.onload = im.onerror = res; im.src = src; setTimeout(res, 4000); });
   async function nextRound() {
     const g = game; const tok = g.token;
@@ -336,8 +425,7 @@
       if (tok !== game.token) return;
     }
     if (!qn) { app.innerHTML = `<section class="panel"><h2>Couldn't load pictures</h2><p>The Wikipedia image API didn't answer. Check your connection (or an ad/privacy blocker blocking wikipedia.org) and try again.</p><a class="btn" href="#/mode/${g.id}">Back</a></section>`; return; }
-    const srcs = qn.items ? qn.items.map(x => x.img.src) : qn.img ? [qn.img.src] : [];
-    await Promise.all(srcs.map(preload));
+    await Promise.all(roundImgs(qn).map(i => preload(i.src)));
     if (tok !== game.token) return;
     g.q = qn;
     renderQuestion();
@@ -438,7 +526,7 @@
     g.log.push({ label: q.label, pts, sub: q.sub });
     recordRound(q.sub || g.id, q.key, q.label, pts);
     $('#score').innerHTML = `Round ${g.round}${g.n ? '/' + g.n : ''} · <b>${g.total}</b> pts`;
-    const credits = q.items ? `<div class="credits">${q.items.map(x => credit(x.img)).join('')}</div>` : credit(q.img);
+    const credits = `<div class="credits">${roundImgs(q).map(credit).join('')}</div>`;
     $('#reveal').innerHTML = `<div class="reveal ${pts >= 900 ? 'good' : pts >= 400 ? 'ok' : 'bad'}">
         <div class="verdict">${verdict} <span class="pts">+${pts}</span></div>
         <div class="explain">${q.reveal}</div>${credits}
@@ -459,7 +547,7 @@
       <h1>${g.m.icon} ${g.total} <small>/ ${max}</small></h1>
       <p>${g.log.filter(l => l.pts >= 900).length} of ${g.log.length} spot on.</p>
       <ol class="results">${g.log.map(l => `<li class="${l.pts >= 900 ? 'good' : l.pts >= 400 ? 'ok' : 'bad'}"><span>${esc(l.label)}</span><b>${l.pts}</b></li>`).join('')}</ol>
-      <div class="row"><button class="btn" id="share">Copy result</button><button class="btn primary" id="again">Play again</button><a class="btn ghost" href="#/mode/${g.id}">Settings</a>${!g.m.noLearn ? `<a class="btn ghost" href="#/sheets/${g.id}">Cheat sheet</a>` : ''}</div></section>`;
+      <div class="row"><button class="btn" id="share">Copy result</button><button class="btn primary" id="again">Play again</button><a class="btn ghost" href="#/mode/${g.id}">Settings</a>${hasSheet(g.id) ? `<a class="btn ghost" href="#/sheets/${g.id}">Cheat sheet</a>` : ''}</div></section>`;
     $('#share').onclick = () => copyText(text + (g.seed ? '\n' + location.href : ''));
     $('#again').onclick = () => { const q = new URLSearchParams(location.hash.split('?')[1] || ''); q.delete('seed'); location.hash = `#/play/${g.id}?${q}&r=${Date.now() % 1e5}`; };
   }
@@ -488,6 +576,17 @@
       app.innerHTML = `<section>${head('Landmarks', `<p class="sub">${esc(D.landmarks.about)}</p>`)}
         ${D.landmarks.regions.map(g => `<h2 class="dechead">${esc(g)}</h2><div class="grid gallery">${marks.filter(l => l.g === g).sort((a, b) => a.y - b.y).map(l => `<div class="card pic" data-w="${esc(l.w)}"><div class="ph"></div><div class="cap"><b>${esc(l.n)}</b><span>${markRange(l)} · ${esc(l.city)}</span><em>${esc(l.tell)}</em></div></div>`).join('')}</div>`).join('')}</section>`;
       $$('.pic[data-w]').forEach(el => lazy(el, async () => { const img = await Wiki.lead(el.dataset.w); el.querySelector('.ph').outerHTML = img ? `<img src="${esc(img.src)}" alt="" loading="lazy">` : '<div class="ph none">no image</div>'; }));
+    } else if (id === 'uniforms') {
+      app.innerHTML = `<section>${head('Uniforms & helmets', `<p class="sub">${esc(D.military.about)}</p>`)}
+        ${D.military.kinds.map(k => `<h2 class="dechead">${esc(k)}</h2><div class="grid gallery">${mil.filter(x => x.k === k).sort((a, b) => a.f - b.f).map(x => `<div class="card pic" data-w="${esc(x.w)}"><div class="ph"></div><div class="cap"><b>${esc(x.n)}</b><span>${range(x.f, x.t)} · ${esc(x.army)}</span><em>${esc(x.tell)}</em></div></div>`).join('')}</div>`).join('')}</section>`;
+      $$('.pic[data-w]').forEach(el => lazy(el, async () => { const img = await Wiki.lead(el.dataset.w); el.querySelector('.ph').outerHTML = img ? `<img src="${esc(img.src)}" alt="" loading="lazy">` : '<div class="ph none">no image</div>'; }));
+    } else if (id === 'photos') {
+      app.innerHTML = `<section>${head('Photos by decade', `<p class="sub">${esc(D.photos.about)}</p>`)}
+        ${photoDecs.map(a => `<h2 class="dechead">${a.f}s</h2><p class="tell"><b>Look:</b> ${esc(a.look)}</p><div class="grid gallery small" data-art="${esc(a.w)}"><div class="loading">Loading…</div></div>`).join('')}</section>`;
+      $$('[data-art]').forEach(el => lazy(el, async () => {
+        const list = await Wiki.gallery(el.dataset.art);
+        el.innerHTML = list.map(img => `<a class="card pic" href="${esc(Wiki.fileUrl(img.file))}" target="_blank" rel="noopener"><img src="${esc(img.src)}" alt="" loading="lazy"><div class="cap">${img.year ? `<b>${img.year}</b>` : ''}<em>${esc(img.desc || img.file.replace(/^File:/, ''))}</em></div></a>`).join('') || '<p class="sub">No images found.</p>';
+      }));
     } else if (id === 'outfits') {
       app.innerHTML = `<section>${head('Fashion by decade', `<p class="sub">${D.outfits.about}</p>`)}
         ${outfitArts.map(a => { const rows = D.outfits.sheet.filter(r => { const d = parseInt(r[0], 10); return d >= decade(a.f) && d <= a.t; }); return `<h2 class="dechead">${range(a.f, a.t)}</h2>${rows.map(row => `<p class="tell"><b>${esc(row[0])} women:</b> ${esc(row[1])}<br><b>Men:</b> ${esc(row[2])}<br><b>Quick tell:</b> ${esc(row[3])}</p>`).join('')}<div class="grid gallery small" data-art="${esc(a.w)}"><div class="loading">Loading…</div></div>`; }).join('')}</section>`;
@@ -550,6 +649,22 @@
       case 'logos': return [
         { title: 'Logo changes', cols: ['Brand', 'Year', 'Change'], rows: brands.flatMap(b => b.timeline.map(([y, t]) => [b.b, y, t])),
           groups: brands.map(b => ({ name: b.b, items: b.timeline.map(([y, t]) => ({ tag: y, body: t })) })) }];
+      case 'photos': return [
+        { title: 'The look of each decade', cols: ['Decade', 'Look'], rows: photoDecs.map(d => [`${d.f}s`, d.look]), one: true,
+          groups: [{ items: photoDecs.map(d => ({ tag: `${d.f}s`, body: d.look })) }] },
+        { title: 'Photo tells', cols: ['Clue', 'Period'], rows: D.general.sheet.filter(r => r[0] === 'Photo').map(r => [r[1], r[2]]), one: true,
+          groups: [{ items: D.general.sheet.filter(r => r[0] === 'Photo').map(r => ({ tag: r[2], body: r[1] })) }] }];
+      case 'uniforms': return [
+        { title: 'Uniforms & helmets', cols: ['Name', 'Kind', 'Army', 'From', 'To', 'Tell'], rows: mil.map(x => [x.n, x.k, x.army, x.f, x.t == null ? 'today' : x.t, x.tell]),
+          groups: D.military.kinds.map(k => ({ name: k, items: mil.filter(x => x.k === k).sort((a, b) => a.f - b.f).map(x => ({ tag: range(x.f, x.t), h: x.n, sub: x.army, body: x.tell })) })) }];
+      case 'location': return [
+        { title: 'Country tells', cols: ['Country', 'Region', 'Drives', 'Currency', 'Web', 'Tell'], rows: countries.map(c => [c.c, plateByC[c.c].g, c.d, c.cur, c.tld, c.x]),
+          groups: plateGroups.map(g => ({ name: g, items: countries.filter(c => plateByC[c.c].g === g).map(c => ({ h: c.c, kv: [['Drives', c.d], ['Money', c.cur], ['Web', c.tld]], body: c.x })) })) },
+        { title: 'Driving on the left', cols: ['Country'], rows: leftDrive().map(x => [x]), one: true,
+          groups: [{ items: [{ body: leftDrive().join(' · ') }] }] }];
+      case 'clues': return [
+        { title: 'Not before… (and gone after)', cols: ['Clue', 'Category', 'From', 'Until'], rows: D.clues.items.map(x => [x.c, x.cat, x.f, x.t || '']),
+          groups: groupBy(D.clues.items.slice().sort((a, b) => a.f - b.f), x => x.cat).map(([cat, xs]) => ({ name: `${CLUE_ICONS[cat] || ''} ${cat}`, items: xs.map(x => ({ tag: x.t ? `${x.f}–${x.t}` : `${x.f}+`, body: x.c })) })) }];
       case 'landmarks': return [
         { title: 'Landmarks: not before…', cols: ['Landmark', 'City', 'Region', 'Completed', 'Gone', 'Tell'], rows: marks.map(l => [l.n, l.city, l.g, l.y, l.gone || '', l.tell]),
           groups: D.landmarks.regions.map(g => ({ name: g, items: marks.filter(l => l.g === g).sort((a, b) => a.y - b.y).map(l => ({ tag: markRange(l), h: l.n, sub: l.city, body: l.tell })) })) },
@@ -561,12 +676,16 @@
   function renderFact(f) {
     return `<li class="fact">${f.tag != null ? `<span class="tag">${esc(f.tag)}</span>` : ''}${f.h ? `<b>${esc(f.h)}</b>${f.sub ? ` <small>${esc(f.sub)}</small>` : ''}${f.body || f.kv ? '<br>' : ''}` : ''}${f.body ? `<span>${esc(f.body)}</span>` : ''}${(f.kv || []).map(([k, v]) => `<div class="kv"><span>${esc(k)}</span>${esc(v)}</div>`).join('')}${f.note ? `<div class="note">${esc(f.note)}</div>` : ''}</li>`;
   }
-  const SHEET_TABS = [['general', '🕰️ Era tells'], ['cars', '🚗 Cars'], ['outfits', '👗 Outfits'], ['landmarks', '🏙️ Landmarks'], ['languages', '🔤 Languages'], ['plates', '🚘 Plates'], ['logos', '🥤 Logos']];
+  const SHEET_TABS = [['general', '🕰️ Era tells'], ['clues', '🧩 Clues'], ['cars', '🚗 Cars'], ['outfits', '👗 Outfits'], ['photos', '📷 Photos'], ['landmarks', '🏙️ Landmarks'], ['uniforms', '🪖 Military'],
+    ['location', '🌍 Countries'], ['languages', '🔤 Languages'], ['plates', '🚘 Plates'], ['logos', '🥤 Logos']];
+  const SHEET_DATA = { location: 'countries', uniforms: 'military' };
+  function hasSheet(id) { return SHEET_TABS.some(([k]) => k === id); }
+  const leftDrive = () => countries.filter(c => /left/i.test(c.d)).map(c => c.d.startsWith('Left') ? c.c : `${c.c} (until ${c.d.match(/until (\d+)/)[1]})`);
   function viewSheets(id) {
     setNav('sheets');
-    if (!SHEET_TABS.some(([k]) => k === id)) id = 'general';
+    if (!hasSheet(id)) id = 'general';
     const secs = sheetSections(id);
-    const about = (D[id] && D[id].about) || '';
+    const about = (D[SHEET_DATA[id] || id] || {}).about || '';
     app.innerHTML = `<section class="sheets">
       <h1>Cheat sheets</h1>
       <div class="tabs">${SHEET_TABS.map(([k, l]) => `<a class="tab${k === id ? ' on' : ''}" href="#/sheets/${k}">${l}</a>`).join('')}</div>
